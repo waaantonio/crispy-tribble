@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Station Activity Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+      :root {
+        font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+        line-height: 1.5;
+        font-weight: 400;
+        color-scheme: light dark;
+        background-color: #ffffff;
+        color: #213547;
+      }
+
+      body {
+        margin: 0;
+        display: flex;
+        place-items: center;
+        min-width: 320px;
+        min-height: 100vh;
+      }
+
+      #app {
+        width: 100%;
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 2rem;
+      }
+
+      .chart-container {
+        width: 100%;
+        height: 600px;
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        margin-bottom: 2rem;
+      }
+
+      .stats-container {
+        background: white;
+        padding: 2rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+
+      .stats-title {
+        margin: 0 0 1.5rem;
+        font-size: 1.5rem;
+        text-align: center;
+        color: #213547;
+      }
+
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 1.5rem;
+        margin-bottom: 1.5rem;
+      }
+
+      .stat-item {
+        text-align: center;
+        padding: 1rem;
+        background: #f8f9fa;
+        border-radius: 6px;
+      }
+
+      .stat-label {
+        font-size: 0.9rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+      }
+
+      .stat-value {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #213547;
+      }
+
+      .total-stat {
+        text-align: center;
+        padding: 1.5rem;
+        background: #f8f9fa;
+        border-radius: 6px;
+        margin-top: 1.5rem;
+      }
+
+      .total-stat .stat-label {
+        color: #213547;
+        font-size: 1rem;
+      }
+
+      .total-stat .stat-value {
+        font-size: 2rem;
+        color: #213547;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <h1>Upload XML File</h1>
+      <form id="uploadForm">
+          <input id="xmlFile" type="file" name="xmlFile" accept=".xml" required />
+      </form>
+      <div class="chart-container">
+        <canvas id="stationChart"></canvas>
+      </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+    const fileInput = document.getElementById('xmlFile');
+
+
+    fileInput.addEventListener('change', function(e) {
+      let incrementBy = 1; // 1 = 10 minutes, 6 = 60 minutes
+      let existingChart;
+
+      let numberBunsPerTime = [];
+      let t = {};
+      let increments = [];
+
+        const file = fileInput.files[0];
+
+        if (!file) {
+            alert('Please select an XML file first.');
+            return;
+        }
+
+        const reader = new FileReader();
+
+        reader.onload = function(event) {
+            console.log("loaded");
+            const xmlData = event.target.result;
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(xmlData, "text/xml");
+
+            const SIMU_LOG = xmlDoc.getElementsByTagName("SIMU_LOG").length != 0 ? xmlDoc.getElementsByTagName("SIMU_LOG") : xmlDoc.getElementsByTagName("PROD_LOG");
+           
+            console.log( SIMU_LOG);
+            const SIMU_LOG1 = [...SIMU_LOG].pop();
+            const SIMU_LOG2 = SIMU_LOG1.parentNode.removeChild(SIMU_LOG1);
+                        
+            let stationData = Array.from(SIMU_LOG).map((element) => {
+              // Extract attributes and convert them into an object
+              let attributes = Array.from(element.attributes).reduce((obj, attr) => {
+                obj[attr.name] = attr.value;
+                return obj;
+              }, {});
+
+              return attributes; // Return the attributes as an object
+            });
+
+        // Function to separate JSON data into buckets
+        function separateIntoBuckets(jsonData, bucketSize) {
+            // If the array is empty, return an empty array
+            if (jsonData.length === 0) return [];
+
+            // Create buckets
+            const buckets = [];
+            for (let i = 0; i < jsonData.length; i += bucketSize) {
+                buckets.push(jsonData.slice(i, i + bucketSize));
+            }
+
+            return buckets;
+        }
+
+        function createTimeAccumulator() {
+            let totalMinutes = 0; // Accumulated time in minutes
+
+            return function (increment) {
+                totalMinutes += increment * 60; // Add the new increment in minutes
+                const hours = Math.floor(totalMinutes / 60); // Calculate hours
+                const minutes = totalMinutes % 60; // Calculate remaining minutes
+
+                return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+            };
+        }
+
+
+const getTimeFromIncrements = createTimeAccumulator();
+
+const buckets = separateIntoBuckets(stationData, incrementBy);
+
+let i = 1;
+buckets.map((item, i) => {
+  increments.push(getTimeFromIncrements(incrementBy)); 
+});
+
+const stnCount = Object.keys(buckets[0][0]).filter(key => key.startsWith("STN"));
+
+let stnBuckets = [];
+
+buckets.forEach((item, i) => {
+  console.log(i);
+  i += 1;
+  stnBuckets.push({ ["bucket" + i]:  []});
+  console.log(stnBuckets);
+  // map each bucket
+  item.forEach((el, j) => {
+    console.log(el);
+    for (let key in el) {
+      console.log(i);
+      if(key.includes("STN")) {
+        
+        stnBuckets[i - 1]["bucket" + i].push({ [key]: +el[key] });
+
+      }
+    }
+  })
+});
+
+
+let bucketsSum = [];
+stnCount.length
+
+stnBuckets.forEach((element, i) => {
+  i += 1;
+
+ bucketsSum.push( element['bucket' + i].reduce((acc, obj) => {
+    const [key, value] = Object.entries(obj)[0];
+    if (!acc[key]) acc[key] = 0; // Initialize key if not present
+    if (!isNaN(value)) acc[key] += value; // Add value if it's not NaN
+    return acc;
+  }, {}));
+});
+
+  // If a chart already exists, destroy it
+  if (existingChart) {
+    existingChart.destroy();
+  }
+
+  const randomHexColors = Array.from({ length: 25 }, () =>
+  `#${Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0')}`
+);
+
+stationData.forEach(el => {
+  numberBunsPerTime.push(+el.TOTAL * 6)
+});
+
+bucketsSum.forEach((item, i) => {
+  Object.entries(item).forEach((el, j) => { 
+    
+    if (!t[el[0]]) {
+      t[el[0]] = [];
+    }
+
+    t[el[0]].push(el[1] * 6); 
+  });
+
+});
+
+
+// Extract attributes and convert them into an object
+const overallData = Array.from(SIMU_LOG2.attributes).reduce((obj, attr) => {
+  obj[attr.name] = attr.value;
+  return obj;
+}, {});
+
+
+let d = [{
+    label: 'Number of buns per time',
+    data: numberBunsPerTime,
+    borderColor: 'rgba(75, 192, 192, 0.7)',
+    backgroundColor: 'rgba(75, 192, 192, 0.4)',
+    type: 'bar',
+    order: 0,
+    borderWidth: 2,
+    borderRadius: 10,
+}];
+
+  stnCount.forEach((element, k) => {
+    k += 1;
+    d.push(
+      { label: `Station ${k}` , data: t[`STN${k}`], borderColor: randomHexColors[k] }
+    );
+  }); 
+
+        // Create and render the chart
+        const ctx = document.getElementById('stationChart').getContext('2d');
+        d.forEach(d => {
+          d.tension = 0.4;
+          d.fill = false;
+          d.borderWidth = 2;
+          d.pointRadius = 4;
+          d.pointHoverRadius = 6;
+        });
+
+        existingChart = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: increments, 
+            datasets: d,
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              title: {
+                display: true,
+                text: 'Station Activity Over Time',
+                font: { size: 16 }
+              },
+              legend: {
+                position: 'bottom'
+              }
+            },
+            scales: {
+              x: {
+                title: {
+                  display: true,
+                  text: 'Time'
+                }
+              },
+              y: {
+                title: {
+                  display: true,
+                  text: 'Number of Buns'
+                },
+                beginAtZero: true
+              }
+            }
+          }
+        });
+
+        // Create and render the stats display
+        // const app = document.getElementById('app');
+        // const statsDisplay = createStatsDisplay(overallData);
+        // if (document.getElementsByClassName('stats-container')[0]) {
+        //   document.getElementsByClassName('stats-container')[0].remove();
+        // }
+        // app.appendChild(statsDisplay);
+    
+
+
+
+
+        };
+
+        reader.onerror = function() {
+            console.error("Error reading file.");
+        };
+
+        reader.readAsText(file); // This is critical to trigger the onload event
+    });
+
+
+      function createStatsDisplay(data) {
+        console.log(data);
+        const container = document.createElement('div');
+        container.className = 'stats-container';
+        
+        const title = document.createElement('h2');
+        title.textContent = 'Daily Total Statistics (23:59:59)';
+        title.className = 'stats-title';
+        
+        const grid = document.createElement('div');
+        grid.className = 'stats-grid';
+        
+        const stations = [
+          { label: 'Station 1', value: data.STN1, color: '#FF6384' },
+          { label: 'Station 2', value: data.STN2, color: '#36A2EB' },
+          { label: 'Station 3', value: data.STN3, color: '#FFCE56' },
+          { label: 'Station 4', value: data.STN4, color: '#4BC0C0' },
+          { label: 'Station 5', value: data.STN5, color: '#9966FF' },
+          { label: 'Station 6', value: data.STN6, color: '#FF9F40' },
+          { label: 'Station 7', value: data.STN7, color: '#7CBA3B' }
+        ];
+        
+        stations.forEach(station => {
+          const stat = document.createElement('div');
+          stat.className = 'stat-item';
+          stat.innerHTML = `
+            <div class="stat-label" style="color: ${station.color}">${station.label}</div>
+            <div class="stat-value">${station.value}</div>
+          `;
+          grid.appendChild(stat);
+        });
+        
+        const total = document.createElement('div');
+        total.className = 'total-stat';
+        total.innerHTML = `
+          <div class="stat-label">Total Buns</div>
+          <div class="stat-value">${data.TOTAL}</div>
+        `;
+        
+        container.appendChild(title);
+        container.appendChild(grid);
+        container.appendChild(total);
+        
+        return container;
+      }
+
+    });
+
+    </script>
+  </body>
+</html>
